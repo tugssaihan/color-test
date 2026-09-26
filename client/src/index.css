@@ -1,0 +1,10 @@
+:root {
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  color: #f4f1e9;
+  background: #0a0a0d;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+html, body, #root { min-width: 320px; min-height: 100%; margin: 0; }
+body { min-height: 100svh; }
