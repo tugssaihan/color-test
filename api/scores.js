@@ -1,4 +1,4 @@
-import { addScore, topScores } from '../server/src/score-store.js'
+import { addScore, topScores } from '../lib/score-store.js'
 
 export default async function handler(request, response) {
   try {

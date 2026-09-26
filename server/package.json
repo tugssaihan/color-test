@@ -1,8 +1,0 @@
-{
-  "name": "color-showdown-server",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "scripts": { "dev": "node --env-file-if-exists=.env --watch src/index.js", "start": "node --env-file-if-exists=.env src/index.js", "lint": "oxlint src scripts", "test": "node scripts/smoke.mjs" },
-  "devDependencies": { "oxlint": "^1.81.0" }
-}

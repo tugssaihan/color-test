@@ -1,56 +1,47 @@
 # Color Showdown
 
-A single-player, 12-level color-spotting run with an increasingly difficult tile grid and a Supabase-backed global leaderboard.
+A single-player, 12-level color-spotting run with a Supabase leaderboard and a Vercel serverless API.
 
-## Local development
+## Run locally
 
-Open two terminals from the repository root.
-
-```powershell
-cd server
-npm install
-npm run dev
-```
+Install the client dependencies once:
 
 ```powershell
 cd client
 npm install
+cd ..
+```
+
+Then run the complete app from the repository root:
+
+```powershell
 npm run dev
 ```
 
-Open `http://localhost:5173`. Without Supabase variables the local server automatically uses an in-memory leaderboard.
+Open the local URL it prints, normally `http://localhost:5173`.
 
-## Supabase setup
+Vite serves a local-only `/api/scores` adapter using the same Supabase helper as the Vercel function. There is no standalone Node server and no Vercel login is needed for local testing.
 
-1. Create a Supabase project.
-2. Run `supabase/schema.sql` in the Supabase SQL editor.
-3. Copy `server/.env.example` to `server/.env` and add the project URL and service-role key.
+## Environment variables
 
-The service-role key is used only by the local API or Vercel serverless function. Never add it to a `VITE_` environment variable.
+Local Supabase credentials live in the ignored root `.env.local` file:
 
-## Vercel deployment
+```env
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SECRET_KEY=sb_secret_your-secret-key
+```
 
-Import the repository into Vercel and keep the repository root as the project root. `vercel.json` builds the Vite client and exposes `api/scores.js` as the leaderboard API.
+Never prefix the secret with `VITE_` or commit `.env.local`.
 
-Add these environment variables in Vercel project settings:
+For production, add the same variables under **Vercel → Project → Settings → Environment Variables**, then redeploy.
 
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
+## Supabase
 
-Deploy after saving them. The browser calls `/api/scores`, so no client-side URL or secret is required.
+Run `supabase/schema.sql` in the Supabase SQL Editor. It creates the `scores` table and ranking index with Row Level Security enabled.
 
 ## Checks
 
 ```powershell
-cd client
 npm run lint
 npm run build
-```
-
-With the local server running:
-
-```powershell
-cd server
-npm run lint
-npm test
 ```
