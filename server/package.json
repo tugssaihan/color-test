@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "scripts": { "dev": "node --watch src/index.js", "start": "node src/index.js", "lint": "oxlint src scripts", "test": "node scripts/smoke.mjs" },
-  "dependencies": { "ws": "^8.18.3" },
+  "scripts": { "dev": "node --env-file-if-exists=.env --watch src/index.js", "start": "node --env-file-if-exists=.env src/index.js", "lint": "oxlint src scripts", "test": "node scripts/smoke.mjs" },
   "devDependencies": { "oxlint": "^1.81.0" }
 }

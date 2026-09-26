@@ -1,0 +1,6 @@
+{
+  "name": "color-showdown",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "npm run build --prefix client" }
+}

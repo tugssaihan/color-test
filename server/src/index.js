@@ -1,159 +1,41 @@
 import http from 'node:http'
-import { WebSocketServer, WebSocket } from 'ws'
+import { addScore, topScores } from './score-store.js'
 
 const PORT = Number(process.env.PORT) || 8787
-const rooms = new Map()
-const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+function json(response, status, payload) {
+  response.writeHead(status, { 'content-type': 'application/json', 'access-control-allow-origin': '*' })
+  response.end(JSON.stringify(payload))
+}
+async function readJson(request) {
+  let body = ''
+  for await (const chunk of request) {
+    body += chunk
+    if (body.length > 10_000) throw new Error('Body too large')
+  }
+  return JSON.parse(body || '{}')
+}
 
-const server = http.createServer((request, response) => {
-  if (request.url === '/health') {
-    response.writeHead(200, { 'content-type': 'application/json' })
-    response.end(JSON.stringify({ ok: true, rooms: rooms.size }))
+const server = http.createServer(async (request, response) => {
+  if (request.method === 'OPTIONS') {
+    response.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS', 'access-control-allow-headers': 'content-type' })
+    response.end()
     return
   }
-  response.writeHead(404, { 'content-type': 'application/json' })
-  response.end(JSON.stringify({ error: 'Not found' }))
-})
-
-const wss = new WebSocketServer({ server, path: '/socket' })
-
-function createCode() {
-  let code = ''
-  do {
-    code = Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('')
-  } while (rooms.has(code))
-  return code
-}
-
-function publicPlayers(room) {
-  return room.players.map(({ id, username, score, finished }) => ({ id, username, score, finished }))
-}
-
-function send(socket, payload) {
-  if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload))
-}
-
-function broadcast(room, payload) {
-  room.players.forEach((player) => send(player.socket, payload))
-}
-
-function makeRound(level) {
-  const baseHue = Math.floor(Math.random() * 360)
-  const delta = Math.max(2, 26 - level * 2)
-  const direction = Math.random() > 0.5 ? 1 : -1
-  const oddHue = (baseHue + direction * delta + 360) % 360
-  const oddIndex = Math.floor(Math.random() * 9)
-  const baseColor = `hsl(${baseHue} 55% 55%)`
-  const oddColor = `hsl(${oddHue} 55% 55%)`
-  const colors = Array.from({ length: 9 }, (_, index) => index === oddIndex ? oddColor : baseColor)
-  return { level, colors, oddIndex }
-}
-
-function getRound(room, level) {
-  if (!room.rounds.has(level)) room.rounds.set(level, makeRound(level))
-  return room.rounds.get(level)
-}
-
-function startGame(room) {
-  room.status = 'playing'
-  room.rounds = new Map()
-  room.players.forEach((player) => {
-    player.score = 0
-    player.level = 1
-    player.finished = false
-  })
-  room.players.forEach((player) => send(player.socket, {
-    type: 'game_started', roomCode: room.code, playerId: player.id,
-    players: publicPlayers(room), round: getRound(room, 1),
-  }))
-}
-
-function finishIfReady(room) {
-  if (!room.players.every((player) => player.finished)) return
-  room.status = 'finished'
-  const [first, second] = room.players
-  const winnerId = first.score === second.score ? null : first.score > second.score ? first.id : second.id
-  broadcast(room, { type: 'match_finished', results: { players: publicPlayers(room), winnerId } })
-}
-
-function finishPlayer(room, player) {
-  player.finished = true
-  broadcast(room, { type: 'player_finished', playerId: player.id, players: publicPlayers(room) })
-  finishIfReady(room)
-}
-
-function handleMessage(socket, rawMessage) {
-  let message
-  try { message = JSON.parse(rawMessage.toString()) }
-  catch { send(socket, { type: 'error', message: 'Invalid message.' }); return }
-
-  if (message.type === 'create_room') {
-    const username = String(message.username ?? '').trim().slice(0, 20)
-    if (!username) { send(socket, { type: 'error', message: 'Username is required.' }); return }
-    const code = createCode()
-    const player = { id: crypto.randomUUID(), username, score: 0, level: 1, finished: false, socket }
-    const room = { code, status: 'waiting', players: [player], rounds: new Map() }
-    rooms.set(code, room)
-    socket.roomCode = code
-    socket.playerId = player.id
-    send(socket, { type: 'room_created', roomCode: code, playerId: player.id, players: publicPlayers(room) })
-    return
-  }
-
-  if (message.type === 'join_room') {
-    const username = String(message.username ?? '').trim().slice(0, 20)
-    const code = String(message.roomCode ?? '').trim().toUpperCase()
-    const room = rooms.get(code)
-    if (!username) { send(socket, { type: 'error', message: 'Username is required.' }); return }
-    if (!room) { send(socket, { type: 'error', message: 'Room not found. Check the code and try again.' }); return }
-    if (room.players.length >= 2 || room.status !== 'waiting') { send(socket, { type: 'error', message: 'That room is already full.' }); return }
-    const player = { id: crypto.randomUUID(), username, score: 0, level: 1, finished: false, socket }
-    room.players.push(player)
-    socket.roomCode = code
-    socket.playerId = player.id
-    startGame(room)
-    return
-  }
-
-  const room = rooms.get(socket.roomCode)
-  const player = room?.players.find((candidate) => candidate.id === socket.playerId)
-  if (!room || !player) { send(socket, { type: 'error', message: 'You are not in a room.' }); return }
-
-  if (message.type === 'answer') {
-    if (room.status !== 'playing' || player.finished) return
-    if (Number(message.level) !== player.level) { send(socket, { type: 'error', message: 'That round has already moved on.' }); return }
-    const round = getRound(room, player.level)
-    const correct = Number(message.index) === round.oddIndex
-    send(socket, { type: 'answer_result', message: correct ? 'correct' : 'wrong' })
-    if (!correct) { finishPlayer(room, player); return }
-    player.score = player.level
-    player.level += 1
-    broadcast(room, { type: 'progress', players: publicPlayers(room) })
-    send(socket, { type: 'round', round: getRound(room, player.level) })
-    return
-  }
-
-  if (message.type === 'stop') {
-    if (room.status === 'playing' && !player.finished) finishPlayer(room, player)
-    return
-  }
-
-  if (message.type === 'rematch' && room.status === 'finished' && room.players.length === 2) startGame(room)
-}
-
-wss.on('connection', (socket) => {
-  socket.on('message', (message) => handleMessage(socket, message))
-  socket.on('close', () => {
-    const room = rooms.get(socket.roomCode)
-    if (!room) return
-    room.players = room.players.filter((player) => player.id !== socket.playerId)
-    if (room.players.length === 0) rooms.delete(room.code)
-    else {
-      room.status = 'interrupted'
-      broadcast(room, { type: 'opponent_left' })
-      setTimeout(() => rooms.delete(room.code), 30_000)
+  try {
+    if (request.url === '/health') { json(response, 200, { ok: true }); return }
+    if (request.url === '/api/scores' && request.method === 'GET') { json(response, 200, { leaderboard: await topScores() }); return }
+    if (request.url === '/api/scores' && request.method === 'POST') {
+      const body = await readJson(request)
+      const name = String(body.name ?? '').trim().slice(0, 20)
+      const levelsCleared = Number(body.levels_cleared)
+      if (!name || !Number.isInteger(levelsCleared) || levelsCleared < 0 || levelsCleared > 12) { json(response, 400, { error: 'Invalid score.' }); return }
+      json(response, 201, await addScore(name, levelsCleared))
+      return
     }
-  })
+    json(response, 404, { error: 'Not found.' })
+  } catch (error) {
+    console.error(error)
+    json(response, 500, { error: 'Score service unavailable.' })
+  }
 })
-
-server.listen(PORT, () => console.log(`Color Showdown server listening on http://localhost:${PORT}`))
+server.listen(PORT, () => console.log(`Color Showdown API listening on http://localhost:${PORT}`))

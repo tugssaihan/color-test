@@ -1,39 +1,56 @@
 # Color Showdown
 
-A live, two-player color-spotting game. The React client and Node WebSocket server are intentionally small and run independently.
+A single-player, 12-level color-spotting run with an increasingly difficult tile grid and a Supabase-backed global leaderboard.
 
-## Run locally
+## Local development
 
-Open two terminals from this folder.
+Open two terminals from the repository root.
 
-### 1. Start the server
-
-```bash
+```powershell
 cd server
 npm install
 npm run dev
 ```
 
-The game server runs at `http://localhost:8787` and exposes WebSockets at `/socket`.
-
-### 2. Start the client
-
-```bash
+```powershell
 cd client
 npm install
 npm run dev
 ```
 
-Open the Vite URL (normally `http://localhost:5173`) in two browser windows. Create a room in one and join it from the other using the four-character code.
+Open `http://localhost:5173`. Without Supabase variables the local server automatically uses an in-memory leaderboard.
 
-For another device on the same network, open the LAN URL printed by Vite. The included Vite proxy forwards WebSocket traffic to the local game server. If the server lives elsewhere, create `client/.env.local` with:
+## Supabase setup
 
-```env
-VITE_WS_URL=ws://YOUR_SERVER_HOST:8787/socket
-```
+1. Create a Supabase project.
+2. Run `supabase/schema.sql` in the Supabase SQL editor.
+3. Copy `server/.env.example` to `server/.env` and add the project URL and service-role key.
+
+The service-role key is used only by the local API or Vercel serverless function. Never add it to a `VITE_` environment variable.
+
+## Vercel deployment
+
+Import the repository into Vercel and keep the repository root as the project root. `vercel.json` builds the Vite client and exposes `api/scores.js` as the leaderboard API.
+
+Add these environment variables in Vercel project settings:
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+Deploy after saving them. The browser calls `/api/scores`, so no client-side URL or secret is required.
 
 ## Checks
 
-Run `npm run lint` from each folder. Run `npm run build` from `client/`.
+```powershell
+cd client
+npm run lint
+npm run build
+```
 
-Rooms and scores are held in memory and disappear when the server restarts.
+With the local server running:
+
+```powershell
+cd server
+npm run lint
+npm test
+```

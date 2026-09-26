@@ -1,212 +1,204 @@
-import { useEffect, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
 
-type Player = { id: string; username: string; score: number; finished: boolean }
-type Round = { level: number; colors: string[]; oddIndex: number }
-type Results = { players: Player[]; winnerId: string | null }
-type ServerMessage = {
-  type: string
-  roomCode?: string
-  playerId?: string
-  players?: Player[]
-  round?: Round
-  results?: Results
-  message?: string
+type Tier = 'Noob' | 'Mid' | 'Tuff' | 'Color God'
+type LevelDefinition = { level: number; tier: Tier; gridSize: number; oddCount: number; delta: number }
+type Round = { colors: string[]; oddIndices: number[] }
+type Score = { id?: string; name: string; levels_cleared: number; created_at?: string }
+
+const LEVELS: LevelDefinition[] = [
+  { level: 1, tier: 'Noob', gridSize: 3, oddCount: 3, delta: 40 },
+  { level: 2, tier: 'Noob', gridSize: 3, oddCount: 3, delta: 35 },
+  { level: 3, tier: 'Noob', gridSize: 3, oddCount: 3, delta: 30 },
+  { level: 4, tier: 'Mid', gridSize: 4, oddCount: 2, delta: 18 },
+  { level: 5, tier: 'Mid', gridSize: 4, oddCount: 2, delta: 15 },
+  { level: 6, tier: 'Mid', gridSize: 4, oddCount: 2, delta: 12 },
+  { level: 7, tier: 'Tuff', gridSize: 5, oddCount: 1, delta: 6 },
+  { level: 8, tier: 'Tuff', gridSize: 5, oddCount: 1, delta: 4.5 },
+  { level: 9, tier: 'Tuff', gridSize: 5, oddCount: 1, delta: 3 },
+  { level: 10, tier: 'Color God', gridSize: 6, oddCount: 1, delta: 2 },
+  { level: 11, tier: 'Color God', gridSize: 6, oddCount: 1, delta: 1.5 },
+  { level: 12, tier: 'Color God', gridSize: 6, oddCount: 1, delta: 1 },
+]
+
+function makeRound(level: LevelDefinition): Round {
+  const tileCount = level.gridSize ** 2
+  const baseHue = Math.floor(Math.random() * 360)
+  const direction = Math.random() > .5 ? 1 : -1
+  const oddHue = (baseHue + level.delta * direction + 360) % 360
+  const oddIndices: number[] = []
+  while (oddIndices.length < level.oddCount) {
+    const candidate = Math.floor(Math.random() * tileCount)
+    if (!oddIndices.includes(candidate)) oddIndices.push(candidate)
+  }
+  const base = `hsl(${baseHue} 67% 58%)`
+  const odd = `hsl(${oddHue} 67% 58%)`
+  return { colors: Array.from({ length: tileCount }, (_, index) => oddIndices.includes(index) ? odd : base), oddIndices }
 }
-type Screen = 'landing' | 'waiting' | 'playing' | 'results' | 'opponent-left'
-type Flash = 'correct' | 'wrong' | null
 
-const socketUrl = import.meta.env.VITE_WS_URL || `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/socket`
+function reactionFor(score: number) {
+  if (score <= 2) return { title: 'Eyes on airplane mode', copy: "bro really said ‘i’m colorblind’ without saying it 💀" }
+  if (score <= 5) return { title: 'Aggressively average', copy: "mid effort, mid eyes... it’s giving default settings" }
+  if (score <= 8) return { title: 'Wait, you kinda see', copy: 'okayyy you actually got a lil eye for this, not mad at it' }
+  if (score <= 11) return { title: 'Built suspiciously different', copy: 'not you almost reaching color god status fr... run it back' }
+  return { title: 'The cones have spoken', copy: 'certified color god. your eyeballs need a sponsorship 🐐' }
+}
 
-function LogoMark() {
-  return <span className="logo-mark" aria-hidden="true"><i /><i /><i /><i /></span>
+function Logo() {
+  return <a className="brand" href="/" aria-label="Color Showdown home"><span className="logo-splotch">C</span><span>Color<br />Showdown</span></a>
 }
 
 function App() {
-  const socketRef = useRef<WebSocket | null>(null)
-  const playerIdRef = useRef('')
-  const [screen, setScreen] = useState<Screen>('landing')
-  const [username, setUsername] = useState('')
-  const [roomInput, setRoomInput] = useState('')
-  const [roomCode, setRoomCode] = useState('')
-  const [playerId, setPlayerId] = useState('')
-  const [players, setPlayers] = useState<Player[]>([])
-  const [round, setRound] = useState<Round | null>(null)
-  const [results, setResults] = useState<Results | null>(null)
+  const [screen, setScreen] = useState<'start' | 'play' | 'results'>('start')
+  const [levelIndex, setLevelIndex] = useState(0)
+  const [round, setRound] = useState(() => makeRound(LEVELS[0]))
+  const [selected, setSelected] = useState<number[]>([])
+  const [cleared, setCleared] = useState(0)
+  const [feedback, setFeedback] = useState<'correct' | 'wrong' | null>(null)
+  const [name, setName] = useState('')
+  const [leaderboard, setLeaderboard] = useState<Score[]>([])
+  const [rank, setRank] = useState<number | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState('')
-  const [connecting, setConnecting] = useState(false)
-  const [flash, setFlash] = useState<Flash>(null)
-  const [locked, setLocked] = useState(false)
 
-  useEffect(() => () => socketRef.current?.close(), [])
+  const level = LEVELS[levelIndex]
+  const reaction = useMemo(() => reactionFor(cleared), [cleared])
 
-  const handleMessage = (event: MessageEvent) => {
-    const message = JSON.parse(event.data) as ServerMessage
-    if (message.type === 'room_created') {
-      setRoomCode(message.roomCode ?? '')
-      setPlayerId(message.playerId ?? '')
-      playerIdRef.current = message.playerId ?? ''
-      setPlayers(message.players ?? [])
-      setScreen('waiting')
-    }
-    if (message.type === 'game_started') {
-      setRoomCode(message.roomCode ?? roomCode)
-      setPlayerId((current) => message.playerId ?? current)
-      if (message.playerId) playerIdRef.current = message.playerId
-      setPlayers(message.players ?? [])
-      setRound(message.round ?? null)
-      setResults(null)
-      setLocked(false)
-      setFlash(null)
-      setScreen('playing')
-    }
-    if (message.type === 'round') {
-      setRound(message.round ?? null)
-      setLocked(false)
-    }
-    if (message.type === 'progress') setPlayers(message.players ?? [])
-    if (message.type === 'answer_result') {
-      const wasCorrect = message.message === 'correct'
-      setFlash(wasCorrect ? 'correct' : 'wrong')
-      window.setTimeout(() => setFlash(null), 420)
-    }
-    if (message.type === 'player_finished') {
-      setPlayers(message.players ?? [])
-      const currentPlayer = message.players?.find((player) => player.id === playerIdRef.current)
-      if (currentPlayer?.finished) setLocked(true)
-    }
-    if (message.type === 'match_finished') {
-      setResults(message.results ?? null)
-      setPlayers(message.results?.players ?? [])
-      setScreen('results')
-    }
-    if (message.type === 'opponent_left') setScreen('opponent-left')
-    if (message.type === 'error') {
-      setError(message.message ?? 'Something went wrong. Try again.')
-      setConnecting(false)
-      if (!playerIdRef.current) socketRef.current?.close()
-    }
-  }
-
-  const connectAndSend = (action: 'create_room' | 'join_room') => {
-    const name = username.trim()
-    if (!name) return setError('Enter a username to continue.')
-    if (action === 'join_room' && roomInput.trim().length !== 4) return setError('Enter the 4-character room code.')
-    setConnecting(true)
+  const startRun = () => {
+    setLevelIndex(0)
+    setRound(makeRound(LEVELS[0]))
+    setSelected([])
+    setCleared(0)
+    setFeedback(null)
+    setName('')
+    setLeaderboard([])
+    setRank(null)
+    setSubmitted(false)
     setError('')
-    const socket = new WebSocket(socketUrl)
-    socketRef.current = socket
-    socket.addEventListener('open', () => {
-      socket.send(JSON.stringify({ type: action, username: name, roomCode: roomInput.trim().toUpperCase() }))
-      setConnecting(false)
-    })
-    socket.addEventListener('message', handleMessage)
-    socket.addEventListener('error', () => {
-      setError('Could not reach the game server. Is it running?')
-      setConnecting(false)
-    })
+    setScreen('play')
   }
 
-  const submitJoin = (event: FormEvent) => {
+  const toggleTile = (index: number) => {
+    if (feedback) return
+    setSelected((current) => current.includes(index) ? current.filter((value) => value !== index) : [...current, index])
+  }
+
+  const finish = (score: number) => {
+    setCleared(score)
+    window.setTimeout(() => { setFeedback(null); setScreen('results') }, 480)
+  }
+
+  const checkAnswer = () => {
+    if (!selected.length || feedback) return
+    const correct = selected.length === round.oddIndices.length && selected.every((index) => round.oddIndices.includes(index))
+    if (!correct) { setFeedback('wrong'); finish(cleared); return }
+    const nextCleared = levelIndex + 1
+    setCleared(nextCleared)
+    setFeedback('correct')
+    if (nextCleared === LEVELS.length) { finish(nextCleared); return }
+    window.setTimeout(() => {
+      const nextIndex = levelIndex + 1
+      setLevelIndex(nextIndex)
+      setRound(makeRound(LEVELS[nextIndex]))
+      setSelected([])
+      setFeedback(null)
+    }, 360)
+  }
+
+  const submitScore = async (event: FormEvent) => {
     event.preventDefault()
-    connectAndSend('join_room')
+    if (!name.trim()) { setError('Drop a name first.'); return }
+    setSubmitting(true)
+    setError('')
+    try {
+      const response = await fetch('/api/scores', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), levels_cleared: cleared }),
+      })
+      if (!response.ok) throw new Error('Score submission failed')
+      const data = await response.json()
+      setLeaderboard(data.leaderboard)
+      setRank(data.rank)
+      setSubmitted(true)
+    } catch {
+      setError('Leaderboard ghosted us. Try that again?')
+    } finally { setSubmitting(false) }
   }
-  const chooseTile = (index: number) => {
-    if (locked || !round) return
-    setLocked(true)
-    socketRef.current?.send(JSON.stringify({ type: 'answer', index, level: round.level }))
-  }
-  const stopHere = () => {
-    if (locked) return
-    setLocked(true)
-    socketRef.current?.send(JSON.stringify({ type: 'stop' }))
-  }
-  const copyCode = async () => {
-    try { await navigator.clipboard.writeText(roomCode) }
-    catch { setError('Could not copy automatically. Select the code instead.') }
-  }
-
-  const me = players.find((player) => player.id === playerId)
-  const opponent = players.find((player) => player.id !== playerId)
-  const currentScore = me?.score ?? 0
 
   return (
-    <main className={`app ${flash ? `flash-${flash}` : ''}`}>
-      <header className="site-header">
-        <a className="brand" href="/" aria-label="Color Showdown home"><LogoMark /><span>COLOR<br />SHOWDOWN</span></a>
-        {roomCode && screen !== 'landing' && <div className="room-pill"><span>Room</span> {roomCode}</div>}
-      </header>
+    <main className={`app ${feedback ? `is-${feedback}` : ''}`}>
+      <header><Logo />{screen === 'play' && <button className="quit" type="button" onClick={() => finish(cleared)}>Quit run</button>}</header>
 
-      {screen === 'landing' && (
-        <section className="landing panel" aria-labelledby="landing-title">
-          <div className="eyebrow"><span /> 1V1 COLOR DUEL</div>
-          <h1 id="landing-title">One shade is<br /><em>different.</em></h1>
-          <p className="intro">Spot it before your opponent does. Every round gets harder. One mistake ends your run.</p>
-          <label className="field-label" htmlFor="username">Your username</label>
-          <input id="username" className="text-input" value={username} onChange={(event) => setUsername(event.target.value.slice(0, 20))} placeholder="e.g. chroma_king" autoComplete="nickname" />
-          <button className="primary-button" type="button" disabled={connecting} onClick={() => connectAndSend('create_room')}><span>Create a room</span><b aria-hidden="true">↗</b></button>
-          <div className="divider"><span>or join a friend</span></div>
-          <form className="join-form" onSubmit={submitJoin}>
-            <input className="code-input" value={roomInput} onChange={(event) => setRoomInput(event.target.value.replace(/[^a-z0-9]/gi, '').slice(0, 4).toUpperCase())} placeholder="ROOM CODE" aria-label="Room code" maxLength={4} />
-            <button className="join-button" type="submit" disabled={connecting}>Join room</button>
-          </form>
-          {error && <p className="error" role="alert">{error}</p>}
-          <div className="how-it-works" aria-label="How it works">
-            <span><b>01</b> Find the odd tile</span><i>→</i><span><b>02</b> Keep your run alive</span><i>→</i><span><b>03</b> Highest score wins</span>
+      {screen === 'start' && (
+        <section className="start-screen">
+          <div className="intro-block">
+            <p className="tiny-note">A deeply serious eye exam*</p>
+            <h1>Same-ish<br />isn’t <span>same.</span></h1>
+            <p>Find the different one(s). Clear all 12 levels. Become unbearable about your color vision.</p>
+            <button className="big-button" type="button" onClick={startRun}>Start the run</button>
+            <small>*not medically recognized, obviously</small>
+          </div>
+          <div className="poster" aria-hidden="true">
+            <span className="poster-tile one" /><span className="poster-tile two" /><span className="poster-tile three" />
+            <b>?</b>
           </div>
         </section>
       )}
 
-      {screen === 'waiting' && (
-        <section className="waiting panel" aria-labelledby="waiting-title">
-          <div className="radar" aria-hidden="true"><LogoMark /></div>
-          <div className="eyebrow"><span /> ROOM CREATED</div>
-          <h1 id="waiting-title">Waiting for<br /><em>your rival.</em></h1>
-          <p className="intro">Share this code with the person you want to challenge.</p>
-          <button className="room-code" type="button" onClick={copyCode} aria-label={`Copy room code ${roomCode}`}><span>{roomCode}</span><small>Click to copy</small></button>
-          {error && <p className="error" role="alert">{error}</p>}
-          <div className="waiting-line"><span /> Listening for player two</div>
+      {screen === 'play' && (
+        <section className="play-screen">
+          <div className="level-side">
+            <p className="tier-name">{level.tier}</p>
+            <div className="level-number"><span>Level</span>{String(level.level).padStart(2, '0')}</div>
+            <div className="progress-dots" aria-label={`${cleared} of 12 levels cleared`}>
+              {LEVELS.map((item, index) => <i key={item.level} className={index < cleared ? 'done' : index === levelIndex ? 'now' : ''} />)}
+            </div>
+            <p className="instruction">Find the different one(s). Tap your picks, then lock them in.</p>
+          </div>
+          <div className="board-side">
+            <div className="tile-grid" style={{ gridTemplateColumns: `repeat(${level.gridSize}, 1fr)` }} aria-label={`Level ${level.level} color grid`}>
+              {round.colors.map((color, index) => (
+                <button key={`${level.level}-${index}`} className={`color-tile ${selected.includes(index) ? 'selected' : ''}`} style={{ backgroundColor: color }} type="button" onClick={() => toggleTile(index)} disabled={Boolean(feedback)} aria-pressed={selected.includes(index)} aria-label={`Tile ${index + 1}`} />
+              ))}
+            </div>
+            <button className="submit-picks" type="button" onClick={checkAnswer} disabled={!selected.length || Boolean(feedback)}>{feedback === 'correct' ? 'Yep, nailed it!' : feedback === 'wrong' ? 'Oof. Nope.' : 'Lock in my picks'}</button>
+          </div>
         </section>
       )}
 
-      {screen === 'playing' && round && (
-        <section className="game" aria-labelledby="round-title">
-          <div className="score-row">
-            <div className="score-card is-you"><span className="player-label">You</span><strong>{me?.username}</strong><b>{currentScore}</b></div>
-            <div className="versus">VS</div>
-            <div className="score-card"><span className="player-label">Opponent</span><strong>{opponent?.username ?? 'Waiting…'}</strong><b>{opponent?.score ?? 0}</b></div>
+      {screen === 'results' && (
+        <section className="results-screen">
+          <div className="roast-panel">
+            <p className="result-label">Run complete</p>
+            <div className="final-score"><strong>{cleared}</strong><span>levels<br />cleared</span></div>
+            <h1>{reaction.title}</h1>
+            <p className="reaction">{reaction.copy}</p>
+            <button className="again-button" type="button" onClick={startRun}>Try again</button>
           </div>
-          <div className="round-heading"><div><span>Round</span><h1 id="round-title">{String(round.level).padStart(2, '0')}</h1></div><p>Find the tile with<br />a different hue.</p></div>
-          <div className="tile-grid" aria-label={`Round ${round.level} color grid`}>
-            {round.colors.map((color, index) => <button className="color-tile" key={`${round.level}-${index}`} type="button" style={{ backgroundColor: color }} onClick={() => chooseTile(index)} disabled={locked} aria-label={`Color tile ${index + 1}`} />)}
+          <div className="leaderboard-panel">
+            {!submitted ? (
+              <form onSubmit={submitScore}>
+                <h2>Make it official</h2>
+                <p>Put your run on the global leaderboard.</p>
+                <label htmlFor="score-name">Name</label>
+                <input id="score-name" value={name} onChange={(event) => setName(event.target.value.slice(0, 20))} placeholder="internet celebrity name" maxLength={20} />
+                <button type="submit" disabled={submitting}>{submitting ? 'Posting...' : 'Post my score'}</button>
+                {error && <p className="form-error" role="alert">{error}</p>}
+              </form>
+            ) : (
+              <div className="leaderboard">
+                <div className="rank-sticker">You landed #{rank}</div>
+                <h2>Top ten eyeballs</h2>
+                <ol>
+                  {leaderboard.map((score, index) => <li key={score.id ?? `${score.name}-${index}`}><span><b>{index + 1}</b>{score.name}</span><strong>{score.levels_cleared}</strong></li>)}
+                </ol>
+              </div>
+            )}
           </div>
-          {me?.finished ? <div className="finished-note"><span className="spinner" /> Run complete — waiting for {opponent?.username}</div> : <button className="stop-button" type="button" onClick={stopHere} disabled={locked && !flash}>Stop here · bank {currentScore}</button>}
         </section>
       )}
-
-      {screen === 'results' && results && (
-        <section className="results panel" aria-labelledby="results-title">
-          <div className="eyebrow"><span /> FINAL SCORE</div>
-          <h1 id="results-title">{results.winnerId === null ? 'Dead even.' : results.winnerId === playerId ? 'You win.' : `${opponent?.username} wins.`}</h1>
-          <p className="intro">{results.winnerId === null ? 'Same eyes. Same score. Settle it with another round.' : 'The sharpest eyes take this showdown.'}</p>
-          <div className="result-grid">
-            {results.players.map((player) => <article className={player.id === results.winnerId ? 'winner' : ''} key={player.id}><span>{player.id === playerId ? 'You' : 'Opponent'}</span><strong>{player.username}</strong><b>{player.score}</b><small>{player.id === results.winnerId ? 'Winner' : results.winnerId === null ? 'Tie' : 'Final score'}</small></article>)}
-          </div>
-          <button className="primary-button" type="button" onClick={() => socketRef.current?.send(JSON.stringify({ type: 'rematch' }))}><span>Play a rematch</span><b aria-hidden="true">↻</b></button>
-          <p className="rematch-note">Either player can start the next showdown.</p>
-        </section>
-      )}
-
-      {screen === 'opponent-left' && (
-        <section className="waiting panel" aria-labelledby="left-title">
-          <div className="eyebrow danger"><span /> CONNECTION LOST</div>
-          <h1 id="left-title">Your rival<br /><em>left the room.</em></h1>
-          <p className="intro">This showdown is over. Head back and create a new room when you’re ready.</p>
-          <button className="primary-button" type="button" onClick={() => location.reload()}><span>Back to lobby</span><b>↗</b></button>
-        </section>
-      )}
-      <footer><span>COLOR SHOWDOWN</span><span>Spot the difference. Own the room.</span></footer>
     </main>
   )
 }
