@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
 
-type Tier = 'Noob' | 'Mid' | 'Tuff' | 'Color God'
+type Tier = 'Noob' | 'Mid' | 'Tuff' | 'Color Goat'
 type LevelDefinition = { level: number; tier: Tier; gridSize: number; oddCount: number; delta: number }
 type Round = { colors: string[]; oddIndices: number[] }
 type Score = { id?: string; name: string; levels_cleared: number; created_at?: string }
@@ -17,9 +17,9 @@ const LEVELS: LevelDefinition[] = [
   { level: 7, tier: 'Tuff', gridSize: 5, oddCount: 1, delta: 6 },
   { level: 8, tier: 'Tuff', gridSize: 5, oddCount: 1, delta: 4.5 },
   { level: 9, tier: 'Tuff', gridSize: 5, oddCount: 1, delta: 3 },
-  { level: 10, tier: 'Color God', gridSize: 6, oddCount: 1, delta: 2 },
-  { level: 11, tier: 'Color God', gridSize: 6, oddCount: 1, delta: 1.5 },
-  { level: 12, tier: 'Color God', gridSize: 6, oddCount: 1, delta: 1 },
+  { level: 10, tier: 'Color Goat', gridSize: 6, oddCount: 1, delta: 2 },
+  { level: 11, tier: 'Color Goat', gridSize: 6, oddCount: 1, delta: 1.5 },
+  { level: 12, tier: 'Color Goat', gridSize: 6, oddCount: 1, delta: 1 },
 ]
 
 function makeRound(level: LevelDefinition): Round {
@@ -37,12 +37,47 @@ function makeRound(level: LevelDefinition): Round {
   return { colors: Array.from({ length: tileCount }, (_, index) => oddIndices.includes(index) ? odd : base), oddIndices }
 }
 
+const REACTIONS = {
+  brutal: [
+    { title: 'Eyes on airplane mode', copy: "bro really said ‘i’m colorblind’ without saying it 💀" },
+    { title: 'Vision sold separately', copy: 'the different tile was fighting for its life and you still missed it' },
+    { title: 'Respectfully... how?', copy: 'your eyes loaded the free trial and immediately cancelled' },
+    { title: 'The colors won', copy: 'got folded by a square with a slightly different vibe 😭' },
+    { title: 'Retina skill issue', copy: 'have you tried turning your eyeballs off and back on again?' },
+  ],
+  mid: [
+    { title: 'Aggressively average', copy: "mid effort, mid eyes... it’s giving default settings" },
+    { title: 'Participation vision', copy: 'you saw some colors. not necessarily the right ones, but some' },
+    { title: 'Certified room temperature', copy: 'not terrible, not impressive, deeply present' },
+    { title: 'Your cones clocked out', copy: 'started strong then your eyeballs took their lunch break' },
+    { title: 'Almost cooking', copy: 'the stove was on but nothing made it to the plate' },
+  ],
+  respect: [
+    { title: 'Wait, you kinda see', copy: 'okayyy you actually got a lil eye for this, not mad at it' },
+    { title: 'Cones are coning', copy: 'lowkey sharp. the optometrist might actually be proud' },
+    { title: 'Color adjacent genius', copy: 'you cooked for a minute there, chef' },
+    { title: 'Eyes got credentials', copy: 'that was suspiciously competent. respect where it is due' },
+    { title: 'Not just decoration', copy: 'turns out those eyeballs are doing actual work, love that for you' },
+  ],
+  hype: [
+    { title: 'Built suspiciously different', copy: 'not you almost reaching color goat status fr... run it back' },
+    { title: 'Retina final boss', copy: 'one more push and your eyes unlock legendary status' },
+    { title: 'Actually cracked', copy: 'those cones have been training in secret and it shows' },
+    { title: 'Optometrist nightmare', copy: 'you are seeing frequencies the rest of us were not invited to' },
+    { title: 'Goat mode pending', copy: 'the color throne is literally one run away' },
+  ],
+  god: [
+    { title: 'The cones have spoken', copy: 'certified color goat. your eyeballs need a sponsorship 🐐' },
+    { title: 'Chromatic royalty', copy: 'every pixel bowed. every hue knew your name' },
+    { title: 'Unfair eye advantage', copy: 'please disclose whatever military-grade cones you installed' },
+    { title: 'Color fears you', copy: 'twelve levels cleared. the visible spectrum has filed a complaint' },
+    { title: 'Built in 12K vision', copy: 'your eyes are running hardware the rest of us cannot afford' },
+  ],
+} as const
+
 function reactionFor(score: number) {
-  if (score <= 2) return { title: 'Eyes on airplane mode', copy: "bro really said ‘i’m colorblind’ without saying it 💀" }
-  if (score <= 5) return { title: 'Aggressively average', copy: "mid effort, mid eyes... it’s giving default settings" }
-  if (score <= 8) return { title: 'Wait, you kinda see', copy: 'okayyy you actually got a lil eye for this, not mad at it' }
-  if (score <= 11) return { title: 'Built suspiciously different', copy: 'not you almost reaching color god status fr... run it back' }
-  return { title: 'The cones have spoken', copy: 'certified color god. your eyeballs need a sponsorship 🐐' }
+  const pool = score <= 2 ? REACTIONS.brutal : score <= 5 ? REACTIONS.mid : score <= 8 ? REACTIONS.respect : score <= 11 ? REACTIONS.hype : REACTIONS.god
+  return pool[Math.floor(Math.random() * pool.length)]
 }
 
 function Logo() {
@@ -62,9 +97,9 @@ function App() {
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState('')
+  const [reaction, setReaction] = useState(() => reactionFor(0))
 
   const level = LEVELS[levelIndex]
-  const reaction = useMemo(() => reactionFor(cleared), [cleared])
 
   const startRun = () => {
     setLevelIndex(0)
@@ -87,6 +122,7 @@ function App() {
 
   const finish = (score: number) => {
     setCleared(score)
+    setReaction(reactionFor(score))
     window.setTimeout(() => { setFeedback(null); setScreen('results') }, 480)
   }
 
