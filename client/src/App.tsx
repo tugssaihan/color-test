@@ -123,6 +123,9 @@ function App() {
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState('')
   const [reaction, setReaction] = useState(() => reactionFor(0))
+  const [leaderboardOpen, setLeaderboardOpen] = useState(false)
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false)
+  const [leaderboardError, setLeaderboardError] = useState('')
 
   const level = LEVELS[levelIndex]
 
@@ -154,11 +157,10 @@ function App() {
   const checkAnswer = () => {
     if (!selected.length || feedback) return
     const correct = selected.length === round.oddIndices.length && selected.every((index) => round.oddIndices.includes(index))
-    if (!correct) { setFeedback('wrong'); finish(cleared); return }
-    const nextCleared = levelIndex + 1
-    setCleared(nextCleared)
-    setFeedback('correct')
-    if (nextCleared === LEVELS.length) { finish(nextCleared); return }
+    const nextCleared = correct ? cleared + 1 : cleared
+    if (correct) setCleared(nextCleared)
+    setFeedback(correct ? 'correct' : 'wrong')
+    if (levelIndex === LEVELS.length - 1) { finish(nextCleared); return }
     window.setTimeout(() => {
       const nextIndex = levelIndex + 1
       setLevelIndex(nextIndex)
@@ -166,6 +168,20 @@ function App() {
       setSelected([])
       setFeedback(null)
     }, 360)
+  }
+
+  const openLeaderboard = async () => {
+    setLeaderboardOpen(true)
+    setLeaderboardLoading(true)
+    setLeaderboardError('')
+    try {
+      const response = await fetch('/api/scores')
+      if (!response.ok) throw new Error('Leaderboard request failed')
+      const data = await response.json()
+      setLeaderboard(data.leaderboard)
+    } catch {
+      setLeaderboardError('Could not load the leaderboard. Try again in a sec.')
+    } finally { setLeaderboardLoading(false) }
   }
 
   const submitScore = async (event: FormEvent) => {
@@ -190,7 +206,13 @@ function App() {
 
   return (
     <main className={`app ${feedback ? `is-${feedback}` : ''}`}>
-      <header><Logo />{screen === 'play' && <button className="quit" type="button" onClick={() => finish(cleared)}>Quit run</button>}</header>
+      <header>
+        <Logo />
+        <div className="header-actions">
+          {screen === 'play' && <button className="quit" type="button" onClick={() => finish(cleared)}>Quit run</button>}
+          <button className="leaderboard-button" type="button" onClick={openLeaderboard}>Leaderboard</button>
+        </div>
+      </header>
 
       {screen === 'start' && (
         <section className="start-screen">
@@ -259,6 +281,25 @@ function App() {
             )}
           </div>
         </section>
+      )}
+
+      {leaderboardOpen && (
+        <div className="leaderboard-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setLeaderboardOpen(false) }}>
+          <section className="leaderboard-dialog" role="dialog" aria-modal="true" aria-labelledby="leaderboard-title">
+            <div className="leaderboard-dialog-heading">
+              <div><p>Global ranking</p><h2 id="leaderboard-title">Top ten eyeballs</h2></div>
+              <button className="leaderboard-close" type="button" onClick={() => setLeaderboardOpen(false)} aria-label="Close leaderboard">×</button>
+            </div>
+            {leaderboardLoading && <p className="leaderboard-state">Loading the vision elite...</p>}
+            {leaderboardError && <p className="leaderboard-state error" role="alert">{leaderboardError}</p>}
+            {!leaderboardLoading && !leaderboardError && leaderboard.length === 0 && <p className="leaderboard-state">Nobody has posted a score yet. The throne is free.</p>}
+            {!leaderboardLoading && !leaderboardError && leaderboard.length > 0 && (
+              <ol className="standalone-leaderboard">
+                {leaderboard.map((score, index) => <li key={score.id ?? `${score.name}-${index}`}><span><b>{index + 1}</b>{score.name}</span><strong>{score.levels_cleared}<small>/12</small></strong></li>)}
+              </ol>
+            )}
+          </section>
+        </div>
       )}
     </main>
   )
