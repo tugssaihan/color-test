@@ -28,9 +28,9 @@ const LEVELS: LevelDefinition[] = [
   { level: 7, tier: "Tuff", gridSize: 5, oddCount: 1, delta: 6 },
   { level: 8, tier: "Tuff", gridSize: 5, oddCount: 1, delta: 4.5 },
   { level: 9, tier: "Tuff", gridSize: 5, oddCount: 1, delta: 3 },
-  { level: 10, tier: "Color Goat", gridSize: 6, oddCount: 1, delta: 2 },
-  { level: 11, tier: "Color Goat", gridSize: 6, oddCount: 1, delta: 1.5 },
-  { level: 12, tier: "Color Goat", gridSize: 6, oddCount: 1, delta: 1 },
+  { level: 10, tier: "Color Goat", gridSize: 6, oddCount: 1, delta: 2.5 },
+  { level: 11, tier: "Color Goat", gridSize: 6, oddCount: 1, delta: 2 },
+  { level: 12, tier: "Color Goat", gridSize: 6, oddCount: 1, delta: 1.5 },
 ];
 
 function makeRound(level: LevelDefinition): Round {
